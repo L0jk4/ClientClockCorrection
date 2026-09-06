@@ -131,9 +131,8 @@ void Initialize_gpGlobals_simTicksThisFrame(GameData gd)
 	if (gpGlobals_tickcount != GetGameTickCount())
 	{
 		delete gd;
-		SetFailState("gpGlobals_tickcount != GetGameTickCount() | wrong gpGlobals or its offsets");
+		SetFailState("gpGlobals_tickcount != GetGameTickCount() | wrong gpGlobals::tickcount address");
 	}
-	PrintToServer("%x = addr_gpGlobals_tickcount\n", addr_gpGlobals_tickcount);
 
 	gpGlobals_simTicksThisFrame = gd.GetAddress("gpGlobals::simTicksThisFrame");
 	if (gpGlobals_simTicksThisFrame == Address_Null)

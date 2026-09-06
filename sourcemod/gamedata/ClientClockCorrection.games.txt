@@ -11,7 +11,7 @@
 					"signature"		"gpGlobals" // 8B 0D 10 6D 55 10  | mov  ecx, gpGlobals
 					"read"			"2"         //       ^^ ^^ ^^ ^^  == address of Globals* gpGlobals     
                     "read"          "0"         //      value of gpGlobals == address of Globals struct
-                    "offset"        "24"        //      offset inside this struct
+                    "offset"        "24"        //      address of the object's field at this offset
 				}
 				"linux"
 				{
