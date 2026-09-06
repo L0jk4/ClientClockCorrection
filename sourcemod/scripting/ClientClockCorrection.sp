@@ -20,7 +20,7 @@ public Plugin myinfo =
 	author      = "Lojka",
 	description = "Remakes CBasePlayer::AdjustPlayerTimeBase with per-client clock correction value",
 	version     = "1.0.0",
-	url         = ""
+	url         = "https://github.com/L0jk4/ClientClockCorrection"
 };
 
 #define DEFAULT_CLOCKCORRECTION 20.0
