@@ -1,0 +1,61 @@
+"Games"
+{
+    "#default"
+    {
+        "Addresses"
+		{
+			"gpGlobals::tickcount"
+			{
+				"windows"
+				{
+					"signature"		"gpGlobals" // 8B 0D 10 6D 55 10  | mov  ecx, gpGlobals
+					"read"			"2"         //       ^^ ^^ ^^ ^^  == address of Globals* gpGlobals     
+                    "read"          "0"         //      value of gpGlobals == address of Globals struct
+                    "offset"        "24"        //      offset inside this struct
+				}
+				"linux"
+				{
+					"signature"		"gpGlobals"
+					"read"			"1"
+                    "read"          "0"
+                    "offset"        "24"
+				}
+			}
+			"gpGlobals::simTicksThisFrame"
+			{
+				"windows"
+				{
+					"signature"		"gpGlobals"
+					"read"			"2"
+                    "read"          "0"
+                    "offset"        "36"
+				}
+				"linux"
+				{
+					"signature"		"gpGlobals"
+					"read"			"1"
+                    "read"          "0"
+                    "offset"        "36"
+				}
+			}
+		}
+
+        "Signatures"
+        {
+            "CBasePlayer::AdjustPlayerTimeBase"
+            {
+                "library"  "server"
+                "windows"  "\x55\x8B\xEC\x83\xEC\x10\x56\x57\x8B\x7D\x08\x8B\xF1\x89"
+                "linux"    "@_ZN11CBasePlayer20AdjustPlayerTimeBaseEi"
+            }
+
+            // from the same function
+            "gpGlobals"
+            {
+                "library"  "server"
+                "windows"  "\x8B\x0D\x2A\x2A\x2A\x2A\x8D\x86\x14\x0F\x00\x00\x83\x79\x14\x01"
+                "linux"    "\xA1\x2A\x2A\x2A\x2A\x8B\x97\x2A\x2A\x2A\x2A\x83\x78"
+            }
+        }
+    }
+}
