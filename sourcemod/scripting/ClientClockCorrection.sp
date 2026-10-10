@@ -7,6 +7,10 @@
 #include <sdktools>
 #include <dhooks>
 
+#undef REQUIRE_PLUGIN
+#include <shavit/partner>
+#define REQUIRE_PLUGIN
+
 ConVar        g_hCvarClockCorrection;
 DynamicDetour g_hDetourAdjustPlayerTimeBase;
 
@@ -19,9 +23,9 @@ public Plugin myinfo =
 {
 	name        = "Per-client clock correction",
 	author      = "Lojka",
-	description = "Sets sv_clockcorrection_msecs to a per-client value before CBasePlayer::AdjustPlayerTimeBase runs",
+	description = "Remakes CBasePlayer::AdjustPlayerTimeBase with per-client clock correction value",
 	version     = "1.0.0",
-	url         = ""
+	url         = "https://github.com/L0jk4/ClientClockCorrection/tree/bits"
 };
 
 public void OnPluginStart()
@@ -88,6 +92,9 @@ public void OnPluginStart()
 
 	RegConsoleCmd("sm_clockcorrection", Cmd_SetClockCorrection, "sm_clockcorrection <value> - Sets a client's individual clock correction msecs value");
 	RegConsoleCmd("sm_ccr", 			Cmd_SetClockCorrection, "sm_clockcorrection <value> - Sets a client's individual clock correction msecs value");
+
+	RegConsoleCmd("sm_partnerclockcorrection", 	Cmd_PartnerSetClockCorrection, "sm_clockcorrection <value> - Sets a partner's individual clock correction msecs value");
+	RegConsoleCmd("sm_pccr", 					Cmd_PartnerSetClockCorrection, "sm_clockcorrection <value> - Sets a partner's individual clock correction msecs value");
 }
 
 public void OnClientCookiesCached(int client)
@@ -144,7 +151,7 @@ public MRESReturn Detour_AdjustPlayerTimeBase(int pThis, DHookParam hParams)
 	{
 		int m_nTickBase = GetEntProp(pThis, Prop_Send, "m_nTickBase");	
 
-		int nCorrectionTicks = RoundFloat(0.5 + (g_flClockCorrection[pThis] / 1000.0) / GetTickInterval());
+		int nCorrectionTicks = MStoTicks(g_flClockCorrection[pThis]);
 		int	nIdealFinalTick = GetGameTickCount() + nCorrectionTicks;
 		int nEstimatedFinalTick = m_nTickBase + simulation_ticks;
 
@@ -168,7 +175,12 @@ public Action Cmd_SetClockCorrection(int client, int args)
 {
 	if (args < 1)
 	{
-		Shavit_PrintToChat(client, "Clock correction is %.2f msecs", g_flClockCorrection[client]);
+		Shavit_PrintToChat(client, "Clock correction is %.2f msecs (%d ticks)", g_flClockCorrection[client], MStoTicks(g_flClockCorrection[client]));
+		int partner = GetPartner(client);
+		if (partner)
+		{
+			Shavit_PrintToChat(client, "Clock correction is %.2f msecs (%d ticks) - partner", g_flClockCorrection[partner], MStoTicks(g_flClockCorrection[partner]));
+		}
 		return Plugin_Handled;
 	}
 
@@ -178,6 +190,46 @@ public Action Cmd_SetClockCorrection(int client, int args)
 	float flValue = StringToFloat(sValue);
 	SetClockCorrection(client, flValue);
 
-	Shavit_PrintToChat(client, "Set clock correction value to %.2f msecs", g_flClockCorrection[client]);
+	Shavit_PrintToChat(client, "Set clock correction value to %.2f msecs (%d ticks)", g_flClockCorrection[client], MStoTicks(g_flClockCorrection[client]));
 	return Plugin_Handled;
+}
+
+public Action Cmd_PartnerSetClockCorrection(int client, int args)
+{
+	int partner = GetPartner(client);
+	if (!partner)
+	{
+		Shavit_PrintToChat(client, "You need a partner to use this command!");	
+		return Plugin_Handled;
+	}
+
+	if (args < 1)
+	{
+		Shavit_PrintToChat(client, "Clock correction is %.2f msecs (%d ticks) - partner", g_flClockCorrection[partner], MStoTicks(g_flClockCorrection[partner]));
+		return Plugin_Handled;
+	}
+
+	char sValue[32];
+	GetCmdArg(1, sValue, sizeof(sValue));
+
+	float flValue = StringToFloat(sValue);
+	SetClockCorrection(partner, flValue);
+
+	Shavit_PrintToChat(partner, "Partner set your clock correction value to %.2f msecs (%d ticks)", g_flClockCorrection[partner],  MStoTicks(g_flClockCorrection[partner]));
+	Shavit_PrintToChat(client, 	"Set partner's clock correction value to %.2f msecs (%d ticks)", 	g_flClockCorrection[partner],  MStoTicks(g_flClockCorrection[partner]));
+	return Plugin_Handled;
+}
+
+int MStoTicks(float msecs)
+{
+    return RoundFloat(0.5 + (msecs / 1000.0) / GetTickInterval());
+}
+
+int GetPartner(int client)
+{
+	if (GetFeatureStatus(FeatureType_Native, "Timer_GetPartner") == FeatureStatus_Available)
+	{
+		return Timer_GetPartner(client);
+	}
+	return 0;
 }
