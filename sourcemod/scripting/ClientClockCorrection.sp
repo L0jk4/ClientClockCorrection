@@ -2,154 +2,71 @@
 #pragma newdecls required
 
 #include <sourcemod>
+#include <clientprefs>
+#include <shavit>
 #include <sdktools>
 #include <dhooks>
-#include <clientprefs>
+
+ConVar        g_hCvarClockCorrection;
+DynamicDetour g_hDetourAdjustPlayerTimeBase;
 
 Handle g_hClockCorrection = null;
-DynamicDetour g_hDetourAdjustPlayerTimeBase;
-Address gpGlobals_simTicksThisFrame;
-
 float g_flClockCorrection[MAXPLAYERS + 1]; 
-int   g_ticksClockCorrection[MAXPLAYERS + 1];
-bool g_debugClockCorrection[MAXPLAYERS + 1]; 
+
+Address gpGlobals_simTicksThisFrame = Address_Null;
 
 public Plugin myinfo =
 {
 	name        = "Per-client clock correction",
 	author      = "Lojka",
-	description = "Remakes CBasePlayer::AdjustPlayerTimeBase with per-client clock correction value",
+	description = "Sets sv_clockcorrection_msecs to a per-client value before CBasePlayer::AdjustPlayerTimeBase runs",
 	version     = "1.0.0",
-	url         = "https://github.com/L0jk4/ClientClockCorrection"
+	url         = ""
 };
-
-#define DEFAULT_CLOCKCORRECTION 20.0
 
 public void OnPluginStart()
 {
-	initializeArrays();
+	g_hCvarClockCorrection = FindConVar("sv_clockcorrection_msecs");
+	if (g_hCvarClockCorrection == null)
+		SetFailState("Could not find convar sv_clockcorrection_msecs");
+
 	g_hClockCorrection = RegClientCookie("clock_correction", "Per-player clock correction value", CookieAccess_Private);
-	for (int i = 1; i <= MaxClients; i++)
-	{
-		if (IsClientInGame(i) && !IsFakeClient(i) && AreClientCookiesCached(i))
-			OnClientCookiesCached(i);
-	}
 
 	GameData hGameData = new GameData("ClientClockCorrection.games");
 	if (hGameData == null)
 		SetFailState("Could not load gamedata \"%s\"", "ClientClockCorrection.games");
 
-	Initialize_gpGlobals_simTicksThisFrame(hGameData);
-	CreateDetour_AdjustPlayerTimeBase(hGameData);
-
-	delete hGameData;
-
-	RegConsoleCmd("sm_clockcorrection", Cmd_SetClockCorrection, 	"sm_clockcorrection <value> - Sets a client's individual clock correction msecs value");
-	RegConsoleCmd("sm_ccr", 			Cmd_SetClockCorrection,		"sm_clockcorrection <value> - Sets a client's individual clock correction msecs value");
-	RegConsoleCmd("sm_debugccr", 		Cmd_DebugClockCorrection, 	"Prints [client clock - server clock] and max deviation to console");
-}
-
-// void CBasePlayer::AdjustPlayerTimeBase( int simulation_ticks )
-public MRESReturn Detour_AdjustPlayerTimeBase(int pThis, DHookParam hParams)
-{
-	if (IsFakeClient(pThis)) return MRES_Ignored;
-
-	int simulation_ticks = hParams.Get(1);
-	if (simulation_ticks < 0) return MRES_Supercede;
-
-	int simTicksThisFrame = LoadFromAddress(gpGlobals_simTicksThisFrame, NumberType_Int32);
-
-	if (MaxClients == 1)
+	Address gpGlobals = hGameData.GetMemSig("gpGlobals");
+	if (gpGlobals == Address_Null)
 	{
-		SetEntProp(pThis, Prop_Send, "m_nTickBase", GetGameTickCount() - simulation_ticks + simTicksThisFrame);
+		delete hGameData;
+		SetFailState("Failed to get gpGlobals address");
 	}
-	else
+	int jump_nBytes = hGameData.GetOffset("gpGlobals signature jump numbytes");
+	if (jump_nBytes == -1)
 	{
-		int m_nTickBase = GetEntProp(pThis, Prop_Send, "m_nTickBase");	
-
-		int nCorrectionTicks = g_ticksClockCorrection[pThis];
-		int	nIdealFinalTick = GetGameTickCount() + nCorrectionTicks;
-		int nEstimatedFinalTick = m_nTickBase + simulation_ticks;
-		
-		int	too_fast_limit = nIdealFinalTick + nCorrectionTicks;
-		int	too_slow_limit = nIdealFinalTick - nCorrectionTicks;
-
-		if ( nEstimatedFinalTick > too_fast_limit || // If client gets ahead of this, we'll need to correct
-			 nEstimatedFinalTick < too_slow_limit )  // If client falls behind  this, we'll also need to correct
-		{
-			int nCorrectedTick = nIdealFinalTick - simulation_ticks + simTicksThisFrame;
-			SetEntProp(pThis, Prop_Send, "m_nTickBase", nCorrectedTick);
-			if (g_debugClockCorrection[pThis])
-				PrintToConsole(pThis, "[CCR] diff = %4d | max abs diff = %4d\n", nEstimatedFinalTick - nIdealFinalTick, nCorrectionTicks);
-		}
+		delete hGameData;
+		SetFailState("Failed to get gpGlobals::tickcount offset");
 	}
 
-	return MRES_Supercede;
-}
+	gpGlobals = LoadFromAddress(LoadFromAddress(gpGlobals + view_as<Address>(jump_nBytes), NumberType_Int32), NumberType_Int32);
 
-public Action Cmd_SetClockCorrection(int client, int args)
-{
-	if (args < 1)
+	int simTicksThisFrame_offset = hGameData.GetOffset("gpGlobals::simTicksThisFrame");
+	if (simTicksThisFrame_offset == -1)
 	{
-		ReplyToCommand(client, "[SM] clock correction is %.2f msecs (%d ticks)", g_flClockCorrection[client], g_ticksClockCorrection[client]);
-		return Plugin_Handled;
+		delete hGameData;
+		SetFailState("Failed to get gpGlobals::simTicksThisFrame offset");
 	}
+	gpGlobals_simTicksThisFrame = gpGlobals + view_as<Address>(simTicksThisFrame_offset);
 
-	char sValue[32];
-	GetCmdArg(1, sValue, sizeof(sValue));
-
-	float flValue = StringToFloat(sValue);
-	g_flClockCorrection[client] = flValue;
-	g_ticksClockCorrection[client] = MStoTicks(g_flClockCorrection[client]);
-
-	char buffer[32];
-    FloatToString(flValue, buffer, sizeof(buffer));
-    SetClientCookie(client, g_hClockCorrection, buffer);
-
-	ReplyToCommand(client, "[SM] Set clock correction value to %.2f msecs (%d ticks)", g_flClockCorrection[client], g_ticksClockCorrection[client]);
-	return Plugin_Handled;
-}
-
-public Action Cmd_DebugClockCorrection(int client, int args)
-{
-	g_debugClockCorrection[client] = !g_debugClockCorrection[client];
-	ReplyToCommand(client, "[SM] Clock correction debug - %s", g_debugClockCorrection[client] ? "ON" : "OFF");
-	return Plugin_Handled;
-}
-
-
-void Initialize_gpGlobals_simTicksThisFrame(GameData gd)
-{
-	// To check gpGlobals for correctness
-	Address addr_gpGlobals_tickcount = gd.GetAddress("gpGlobals::tickcount");
-	if (addr_gpGlobals_tickcount == Address_Null)
-	{
-		delete gd;
-		SetFailState("Failed to get gpGlobals::tickcount address");
-	}
-	int gpGlobals_tickcount = LoadFromAddress(addr_gpGlobals_tickcount, NumberType_Int32);
-	if (gpGlobals_tickcount != GetGameTickCount())
-	{
-		delete gd;
-		SetFailState("gpGlobals_tickcount != GetGameTickCount() | wrong gpGlobals::tickcount address");
-	}
-
-	gpGlobals_simTicksThisFrame = gd.GetAddress("gpGlobals::simTicksThisFrame");
-	if (gpGlobals_simTicksThisFrame == Address_Null)
-	{
-		delete gd;
-		SetFailState("Failed to get gpGlobals::simTicksThisFrame address");
-	}
-}
-
-void CreateDetour_AdjustPlayerTimeBase(GameData gd)
-{
+	int tickcount = LoadFromAddress(gpGlobals + view_as<Address>(24), NumberType_Int32);
+	
 	// void CBasePlayer::AdjustPlayerTimeBase( int simulation_ticks )
 	g_hDetourAdjustPlayerTimeBase = new DynamicDetour(Address_Null, CallConv_THISCALL, ReturnType_Void, ThisPointer_CBaseEntity);
 	if (g_hDetourAdjustPlayerTimeBase == null ||
-	    !g_hDetourAdjustPlayerTimeBase.SetFromConf(gd, SDKConf_Signature, "CBasePlayer::AdjustPlayerTimeBase"))
+	    !g_hDetourAdjustPlayerTimeBase.SetFromConf(hGameData, SDKConf_Signature, "CBasePlayer::AdjustPlayerTimeBase"))
 	{
-		delete gd;
+		delete hGameData;
 		SetFailState("Failed to find signature for CBasePlayer::AdjustPlayerTimeBase");
 	}
 
@@ -157,9 +74,20 @@ void CreateDetour_AdjustPlayerTimeBase(GameData gd)
 
 	if (!g_hDetourAdjustPlayerTimeBase.Enable(Hook_Pre, Detour_AdjustPlayerTimeBase))
 	{
-		delete gd;
+		delete hGameData;
 		SetFailState("Failed to enable detour for CBasePlayer::AdjustPlayerTimeBase");
 	}
+
+	delete hGameData;
+
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (IsClientInGame(i))
+			g_flClockCorrection[i] = g_hCvarClockCorrection.FloatValue;
+	}
+
+	RegConsoleCmd("sm_clockcorrection", Cmd_SetClockCorrection, "sm_clockcorrection <value> - Sets a client's individual clock correction msecs value");
+	RegConsoleCmd("sm_ccr", 			Cmd_SetClockCorrection, "sm_clockcorrection <value> - Sets a client's individual clock correction msecs value");
 }
 
 public void OnClientCookiesCached(int client)
@@ -172,26 +100,84 @@ public void OnClientCookiesCached(int client)
     GetClientCookie(client, g_hClockCorrection, value, sizeof(value));
 
     if (value[0] != '\0')
+    {
         g_flClockCorrection[client] = StringToFloat(value);
+    }
     else
-        g_flClockCorrection[client] = DEFAULT_CLOCKCORRECTION; // Default value for new players.
-
-	g_ticksClockCorrection[client] = MStoTicks(g_flClockCorrection[client]);
-	g_debugClockCorrection[client] = false;
+    {
+        // Default value for new players.
+        g_flClockCorrection[client] = g_hCvarClockCorrection.FloatValue;
+    }
 }
 
-
-int MStoTicks(float msecs)
+void SetClockCorrection(int client, float value)
 {
-    return RoundFloat(0.5 + (msecs / 1000.0) / GetTickInterval());
+	if (value < 0.0)
+		value = 0.0;
+	else if (value > 60.0)
+		value = 60.0;
+
+    g_flClockCorrection[client] = value;
+
+    char buffer[32];
+    FloatToString(value, buffer, sizeof(buffer));
+
+    SetClientCookie(client, g_hClockCorrection, buffer);
 }
 
-void initializeArrays()
+// void CBasePlayer::AdjustPlayerTimeBase( int simulation_ticks )
+public MRESReturn Detour_AdjustPlayerTimeBase(int pThis, DHookParam hParams)
 {
-	for (int i = 0; i < MAXPLAYERS + 1; i++)
+	if (IsFakeClient(pThis))
+		return MRES_Ignored;
+
+	int simulation_ticks = hParams.Get(1);	// int simulation_ticks
+	if (simulation_ticks < 0) return MRES_Supercede;
+
+	int simTicksThisFrame = LoadFromAddress(gpGlobals_simTicksThisFrame, NumberType_Int32);
+
+	if (MaxClients == 1)
 	{
-		g_flClockCorrection[i] = DEFAULT_CLOCKCORRECTION;
-		g_ticksClockCorrection[i] = MStoTicks(g_flClockCorrection[i]);
-		g_debugClockCorrection[i] = false;
+		SetEntProp(pThis, Prop_Send, "m_nTickBase", GetGameTickCount() - simulation_ticks + simTicksThisFrame);
 	}
+	else
+	{
+		int m_nTickBase = GetEntProp(pThis, Prop_Send, "m_nTickBase");	
+
+		int nCorrectionTicks = RoundFloat(0.5 + (g_flClockCorrection[pThis] / 1000.0) / GetTickInterval());
+		int	nIdealFinalTick = GetGameTickCount() + nCorrectionTicks;
+		int nEstimatedFinalTick = m_nTickBase + simulation_ticks;
+
+		// If client gets ahead of this, we'll need to correct
+		int	 too_fast_limit = nIdealFinalTick + nCorrectionTicks;
+		// If client falls behind this, we'll also need to correct
+		int	 too_slow_limit = nIdealFinalTick - nCorrectionTicks;
+
+		if ( nEstimatedFinalTick > too_fast_limit ||
+			nEstimatedFinalTick < too_slow_limit )
+		{
+			int nCorrectedTick = nIdealFinalTick - simulation_ticks + simTicksThisFrame;
+			SetEntProp(pThis, Prop_Send, "m_nTickBase", nCorrectedTick);
+		}
+	}
+
+	return MRES_Supercede;
+}
+
+public Action Cmd_SetClockCorrection(int client, int args)
+{
+	if (args < 1)
+	{
+		Shavit_PrintToChat(client, "Clock correction is %.2f msecs", g_flClockCorrection[client]);
+		return Plugin_Handled;
+	}
+
+	char sValue[32];
+	GetCmdArg(1, sValue, sizeof(sValue));
+
+	float flValue = StringToFloat(sValue);
+	SetClockCorrection(client, flValue);
+
+	Shavit_PrintToChat(client, "Set clock correction value to %.2f msecs", g_flClockCorrection[client]);
+	return Plugin_Handled;
 }
