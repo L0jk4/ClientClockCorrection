@@ -93,8 +93,8 @@ public void OnPluginStart()
 	RegConsoleCmd("sm_clockcorrection", Cmd_SetClockCorrection, "sm_clockcorrection <value> - Sets a client's individual clock correction msecs value");
 	RegConsoleCmd("sm_ccr", 			Cmd_SetClockCorrection, "sm_clockcorrection <value> - Sets a client's individual clock correction msecs value");
 
-	RegConsoleCmd("sm_partnerclockcorrection", 	Cmd_PartnerSetClockCorrection, "sm_clockcorrection <value> - Sets a partner's individual clock correction msecs value");
-	RegConsoleCmd("sm_pccr", 					Cmd_PartnerSetClockCorrection, "sm_clockcorrection <value> - Sets a partner's individual clock correction msecs value");
+	RegConsoleCmd("sm_partnerclockcorrection", 	Cmd_PartnerClockCorrection, "sm_clockcorrection <value> - prints partner's individual clock correction msecs value");
+	RegConsoleCmd("sm_pccr", 					Cmd_PartnerClockCorrection, "sm_clockcorrection <value> - prints partner's individual clock correction msecs value");
 }
 
 public void OnClientCookiesCached(int client)
@@ -190,11 +190,19 @@ public Action Cmd_SetClockCorrection(int client, int args)
 	float flValue = StringToFloat(sValue);
 	SetClockCorrection(client, flValue);
 
-	Shavit_PrintToChat(client, "Set clock correction value to %.2f msecs (%d ticks)", g_flClockCorrection[client], MStoTicks(g_flClockCorrection[client]));
+	Shavit_PrintToChat(client, "Set clock correction to %.2f msecs (%d ticks)", g_flClockCorrection[client], MStoTicks(g_flClockCorrection[client]));
+
+	int partner = GetPartner(client);
+	if (!partner)
+	{
+		Shavit_PrintToChat(partner, "Partner set clock correction to %.2f msecs (%d ticks)", g_flClockCorrection[client], MStoTicks(g_flClockCorrection[client]));	
+		return Plugin_Handled;
+	}
+
 	return Plugin_Handled;
 }
 
-public Action Cmd_PartnerSetClockCorrection(int client, int args)
+public Action Cmd_PartnerClockCorrection(int client, int args)
 {
 	int partner = GetPartner(client);
 	if (!partner)
@@ -209,14 +217,6 @@ public Action Cmd_PartnerSetClockCorrection(int client, int args)
 		return Plugin_Handled;
 	}
 
-	char sValue[32];
-	GetCmdArg(1, sValue, sizeof(sValue));
-
-	float flValue = StringToFloat(sValue);
-	SetClockCorrection(partner, flValue);
-
-	Shavit_PrintToChat(partner, "Partner set your clock correction value to %.2f msecs (%d ticks)", g_flClockCorrection[partner],  MStoTicks(g_flClockCorrection[partner]));
-	Shavit_PrintToChat(client, 	"Set partner's clock correction value to %.2f msecs (%d ticks)", 	g_flClockCorrection[partner],  MStoTicks(g_flClockCorrection[partner]));
 	return Plugin_Handled;
 }
 
